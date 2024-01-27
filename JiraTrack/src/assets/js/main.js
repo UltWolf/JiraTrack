@@ -2,28 +2,44 @@
 const { invoke } = window.__TAURI__.tauri;
 var mainWindow="main";
 var configurationWindow="configuration";
-function getWorkdaysArrayForCurrentMonth() {
+const weekendsDays=[new Date(2024,0,1)]
+function getWorkdaysArrayForCurrentMonth(data) {
+    console.log(data);
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth();
     const currentYear = currentDate.getFullYear();
-    const firstDay = new Date(currentYear, currentMonth, 1);
-    const lastDay = new Date(currentYear, currentMonth + 1, 0);
+    const firstDay = new Date(currentYear, currentMonth, 1,20);
+    const lastDay = new Date(currentYear, currentMonth + 1, 0,20);
 
     const workdaysArray = [];
     let currentDay = firstDay;
 
     while (currentDay <= lastDay) {
         const dayOfWeek = currentDay.getDay();
+        const formattedDate = getFormattedDate(currentDay);
+
         if (dayOfWeek !== 0 && dayOfWeek !== 6) {
             // Exclude Sunday (0) and Saturday (6)
-            const formattedDate = getFormattedDate(currentDay);
-            workdaysArray.push(formattedDate);
+
+            // Check if the date exists in worklogs.started
+            const hasWorkLog = data.some(workLogDate => {
+                var currentDayDate = currentDay.getDate();
+                var existedFormatDate =  new Date(workLogDate.started).getDate();
+                var isItWeekend  =weekendsDays.some(f=>f.getDate() === currentDayDate);
+                return  isItWeekend|| currentDayDate=== existedFormatDate  ;
+            });
+
+            if (!hasWorkLog) {
+                workdaysArray.push(formattedDate);
+            }
         }
+
         currentDay.setDate(currentDay.getDate() + 1);
     }
 
     return workdaysArray;
 }
+
 function getFormattedDate(date){
     return date.toISOString().replace(/\.\d{3}Z$/, ".000+0000");
 }
@@ -58,10 +74,11 @@ function sendWorkLog(workLogText,worklogSec, formattedDate){
         });
 }
 window.addEventListener("DOMContentLoaded", () => {
+    var worklogs =[]
     document.getElementById("trackMonth").addEventListener("click",()=>{
-        showError("clicked")
-        var days = getWorkdaysArrayForCurrentMonth();
-        for(var i = 0; i<days.length;i++){
+
+        var days = getWorkdaysArrayForCurrentMonth(worklogs);
+        for(var i = 0; i<=days.length;i++){
             sendWorkLog("", 3600*8,days[i]);
         }
     })
@@ -97,18 +114,21 @@ window.addEventListener("DOMContentLoaded", () => {
     try {
         invoke('get_configuration').then(data=>{
             const jsonData = JSON.parse(data);
+
             document.getElementById("url").value = jsonData.url;
             document.getElementById("username").value = jsonData.username;
             document.getElementById("password").value = jsonData.password;
+            if(jsonData.url!=""){
             invoke("get_task",{username: jsonData.username, url:jsonData.url, password: jsonData.password})
                 .then(result=>{
                     var jsonData = JSON.parse(result);
                     var data = jsonData.Ok.fields;
-                    appendTrackedData(data);
+                    worklogs=appendTrackedData(data);
                     appendSummaryData(data);
                 }).catch(error=>{
                     showError(error);
-            })
+            })}
+
         }).catch(error => {
             showError(error);
         });
@@ -126,6 +146,15 @@ window.addEventListener("DOMContentLoaded", () => {
                 password: document.getElementById("password").value,
                 url: document.getElementById("url").value
             }).then(f=>{
+            invoke("get_task",{username: jsonData.username, url:jsonData.url, password: jsonData.password})
+                .then(result=>{
+                    var jsonData = JSON.parse(result);
+                    var data = jsonData.Ok.fields;
+                    worklogs=appendTrackedData(data);
+                    appendSummaryData(data);
+                }).catch(error=>{
+                showError(error);
+            })
                 changeState(mainWindow)
             }
 
@@ -145,8 +174,10 @@ function appendTrackedData(data){
     var trackedhours = document.getElementById("trackedHours");
     if(data.worklog.worklogs!=null){
         trackedhours.innerText =formatTime(data.worklog.worklogs.reduce((n, {timeSpentSeconds}) => n + timeSpentSeconds, 0));
+        return data.worklog.worklogs;
     }else{
         trackedhours.innerText = 0;
+        return [];
     }
 }
 function appendSummaryData(data){
